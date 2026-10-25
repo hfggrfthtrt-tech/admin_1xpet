@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة تحكم الإدارة - الإيداعات</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; padding: 20px; min-height: 100vh; }
+        .admin-container { max-width: 600px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 20px; color: #38bdf8; font-size: 24px; }
+        .no-requests { text-align: center; color: #94a3b8; margin-top: 40px; font-size: 18px; }
+        .request-card { background-color: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 15px; border: 1px solid #334155; }
+        .req-header { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 10px; }
+        .req-id { font-weight: bold; color: #38bdf8; }
+        .req-method { background: #0284c7; padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .req-body { display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+        .label { color: #94a3b8; }
+        .value { font-weight: bold; color: #fff; }
+        .amount-val { color: #4ade80; font-size: 18px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        .btn-approve { background-color: #22c55e; color: white; }
+        .btn-reject { background-color: #ef4444; color: white; }
+    </style>
+</head>
+<body>
+
+    <div class="admin-container">
+        <h1>Dashboard الإدارة للزعيم 🛠️</h1>
+        <div id="requests-list">
+            <div class="no-requests">جاري تحميل طلبات الإيداع الحالية...</div>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ ضع هنا إعدادات الفيربيز الخاصة بمشروعك
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", 
+            databaseURL: "https://xpetvip-9450f-default-rtdb.firebaseio.com/"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        const requestsListEl = document.getElementById('requests-list');
+
+        // جلب طلبات الإيداع ومراقبتها لايف
+        database.ref('deposit_requests').on('value', (snapshot) => {
+            requestsListEl.innerHTML = "";
+            if (!snapshot.exists()) {
+                requestsListEl.innerHTML = '<div class="no-requests">لا توجد طلبات إيداع معلقة حالياً 👍</div>';
+                return;
+            }
+
+            snapshot.forEach((childSnapshot) => {
+                const req = childSnapshot.val();
+                
+                // هنا بنضمن إن الآيدي يقرأ من جوه بيانات الطلب المبعوث مش من الذاكرة المحلية للأدمن
+                const currentCustomerUID = req.userId || "غير معروف";
+                
+                const card = document.createElement('div');
+                card.className = 'request-card';
+                card.innerHTML = `
+                    <div class="req-header">
+                        <span class="req-id">طلب رقم: #${req.requestId}</span>
+                        <span class="req-method">${req.method}</span>
+                    </div>
+                    <div class="req-body">
+                        <div><span class="label">ID حساب العميل:</span> <span class="value" style="color:#f59e0b;">${currentCustomerUID}</span></div>
+                        <div><span class="label">المبلغ المطلوب:</span> <span class="value amount-val">${req.amount} جنيه</span></div>
+                        <div><span class="label">رقم المرسل:</span> <span class="value">${req.senderNumber}</span></div>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-approve" onclick="approveRequest('${currentCustomerUID}', '${req.amount}', '${req.requestId}')">👍 موافقة وشحن</button>
+                        <button class="btn btn-reject" onclick="rejectRequest('${req.requestId}')">👎 رفض وإلغاء</button>
+                    </div>
+                `;
+                requestsListEl.appendChild(card);
+            });
+        });
+
+        // دالة الموافقة والشحن للحساب الصحيح المتواجد في الفيربيز (User)
+        function approveRequest(customerIdFromCard, amount, requestId) {
+            const parsedAmount = parseFloat(amount);
+            const cleanUserId = String(customerIdFromCard).trim();
+            
+            if (cleanUserId === "غير معروف" || !cleanUserId) {
+                alert("❌ خطأ: لا يمكن الشحن لهذا الحساب لأن الـ ID الخاص به غير معروف في الطلب.");
+                return;
+            }
+            
+            // المسار المطابق للفيربيز الفعلي الخاص بك
+            const userBalanceRef = database.ref('User/' + cleanUserId + '/balance');
+
+            userBalanceRef.once('value').then((snapshot) => {
+                let currentBalance = 0;
+                if (snapshot.exists()) {
+                    currentBalance = parseFloat(snapshot.val());
+                }
+                
+                if (isNaN(currentBalance)) currentBalance = 0;
+                const newBalance = currentBalance + parsedAmount;
+
+                // تحديث الرصيد الجديد لايف في حساب العميل الصحيح
+                userBalanceRef.set(newBalance).then(() => {
+                    // حذف الكارت من شاشة الأدمن بعد إتمام العملية بنجاح
+                    database.ref('deposit_requests/' + requestId).remove().then(() => {
+                        alert("👍 تم شحن " + parsedAmount + " جنيه بنجاح لحساب العميل: " + cleanUserId);
+                    });
+                }).catch(err => alert("فشل في تحديث الرصيد: " + err.message));
+            }).catch(err => alert("خطأ في قراءة بيانات المستخدم: " + err.message));
+        }
+
+        function rejectRequest(requestId) {
+            if (confirm("هل أنت متأكد من رفض هذا الطلب وحذفه؟")) {
+                database.ref('deposit_requests/' + requestId).remove().then(() => {
+                    alert("تم رفض الطلب وحذفه بنجاح.");
+                });
+            }
+        }
+    </script>
+</body>
+</html>
